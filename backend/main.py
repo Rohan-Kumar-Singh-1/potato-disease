@@ -23,7 +23,7 @@ app.add_middleware(
 )
 
 # TensorFlow Serving endpoint
-model = tf.keras.models.load_model("potato_model.keras")
+model = tf.keras.models.load_model("potato_model.keras", compile=False)
 # Class labels — update to match your model's output order
 CLASS_NAMES = [
     "Potato___Early_Blight",
