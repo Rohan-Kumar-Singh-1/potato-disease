@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL;
 
 const severityBadge = {
   none: { bg: "#14532d", text: "#bbf7d0", label: "Healthy" },
