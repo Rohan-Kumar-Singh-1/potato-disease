@@ -1,25 +1,29 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import numpy as np
 from PIL import Image
 import io
+import tensorflow as tf
 import json
+import uvicorn
+
 
 app = FastAPI(title="Potato Disease Prediction API", version="1.0.0")
 
 # Allow requests from React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # ← change this
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # TensorFlow Serving endpoint
-TF_SERVING_URL = "http://localhost:8501/v1/models/plant_disease_model:predict"
-
+model = tf.keras.models.load_model("potato_model.keras")
 # Class labels — update to match your model's output order
 CLASS_NAMES = [
     "Potato___Early_Blight",
@@ -55,15 +59,14 @@ CLASS_INFO = {
     },
 }
 
-IMG_SIZE = 256  # Change if your model uses a different input size
+IMG_SIZE = 224  # Change if your model uses a different input size
 
 
 def preprocess_image(image_bytes: bytes) -> list:
     """Resize and normalize image for model input."""
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    image = image.resize((IMG_SIZE, IMG_SIZE))
-    img_array = np.array(image, dtype=np.float32) / 255.0
-    return img_array.tolist()  # shape: [256, 256, 3]
+    image = np.array(image)
+    return image.astype(np.float32) 
 
 
 @app.get("/")
@@ -78,69 +81,40 @@ def health():
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    # Validate file type
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Uploaded file must be an image.")
+    image = preprocess_image(await file.read())
+    image_batch = np.expand_dims(image, axis=0)
 
-    image_bytes = await file.read()
-
-    try:
-        input_data = preprocess_image(image_bytes)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Failed to process image: {str(e)}")
-
-    payload = {"instances": [input_data]}
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(TF_SERVING_URL, json=payload)
-            response.raise_for_status()
-    except httpx.ConnectError:
-        raise HTTPException(
-            status_code=503,
-            detail="Cannot connect to TensorFlow Serving. Make sure Docker is running.",
-        )
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"TensorFlow Serving returned error: {e.response.text}",
-        )
-
-    tf_result = response.json()
-    predictions = tf_result.get("predictions", [[]])[0]
-
-    if len(predictions) != len(CLASS_NAMES):
-        raise HTTPException(
-            status_code=500,
-            detail=f"Model returned {len(predictions)} classes, expected {len(CLASS_NAMES)}.",
-        )
-
-    predicted_index = int(np.argmax(predictions))
-    predicted_class = CLASS_NAMES[predicted_index]
-    confidence = float(predictions[predicted_index]) * 100
-
-    # Build full result with all class probabilities
-    all_predictions = [
-        {
-            "class_key": CLASS_NAMES[i],
-            "label": CLASS_INFO[CLASS_NAMES[i]]["label"],
-            "probability": round(float(predictions[i]) * 100, 2),
-            "color": CLASS_INFO[CLASS_NAMES[i]]["color"],
-        }
-        for i in range(len(CLASS_NAMES))
-    ]
-    all_predictions.sort(key=lambda x: x["probability"], reverse=True)
+    prediction = model.predict(image_batch, verbose=0)[0]
+    print(prediction)
+    predicted_class = CLASS_NAMES[np.argmax(prediction)]
+    confidence = float(np.max(prediction))
 
     info = CLASS_INFO[predicted_class]
 
+    all_predictions = []
+    for i, prob in enumerate(prediction):
+        key = CLASS_NAMES[i]
+        meta = CLASS_INFO[key]
+
+        all_predictions.append({
+            "class_key": key,
+            "label": meta["label"],
+            "probability": float(prob * 100),
+            "color": meta["color"]
+    })
+
     return {
-        "predicted_class": predicted_class,
+        "class": predicted_class,
         "label": info["label"],
-        "confidence": round(confidence, 2),
+        "emoji": info["emoji"],
         "severity": info["severity"],
         "color": info["color"],
-        "emoji": info["emoji"],
         "description": info["description"],
         "treatment": info["treatment"],
-        "all_predictions": all_predictions,
-    }
+        "confidence": float(confidence * 100),
+        "all_predictions": all_predictions
+}
+
+
+# if __name__ == "__main__":
+#     uvicorn.run(app, host="0.0.0.0", port=8000)
