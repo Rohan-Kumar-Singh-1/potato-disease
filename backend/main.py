@@ -23,7 +23,7 @@ app.add_middleware(
 )
 
 # TensorFlow Serving endpoint
-model = tf.keras.models.load_model("fixed_model.keras", compile=False)
+model = tf.keras.models.load_model("fixed_model_v2.keras", compile=False)
 model.layers[1].trainable = False
 # Class labels — update to match your model's output order
 CLASS_NAMES = [
