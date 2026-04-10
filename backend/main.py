@@ -24,6 +24,7 @@ app.add_middleware(
 
 # TensorFlow Serving endpoint
 model = tf.keras.models.load_model("fixed_model.keras", compile=False)
+model.layers[1].trainable = False
 # Class labels — update to match your model's output order
 CLASS_NAMES = [
     "Potato___Early_Blight",
@@ -62,10 +63,10 @@ CLASS_INFO = {
 IMG_SIZE = 224  # Change if your model uses a different input size
 
 
-def preprocess_image(image_bytes: bytes) -> list:
-    """Resize and normalize image for model input."""
+def preprocess_image(image_bytes: bytes):
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    image = np.array(image)
+    image = image.resize((224, 224))   # ✅ control input size
+    image = np.array(image)            # ❗ DO NOT divide by 255 (model already does)
     return image.astype(np.float32) 
 
 
